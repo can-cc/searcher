@@ -126,11 +126,17 @@ def main():
 		if not ttyname:
 				exit_program(error_message("""No tty name is given and failed to guess it from descriptors.
 Maybe all descriptors are redirecred."""))
+		print ttyname
+		def open_tty(ttyname):
+			if six.PY2:
+				return open(ttyname, "r+w")
+			else:
+				# See https://github.com/stefanholek/term/issues/1
+				return open(ttyname, "wb+", buffering=0)
 
-		# decide which encoding to use
-		#output_encoding = set_proper_locale(options)
-		#input_encoding = options.input_encoding
-
+		with open_tty(ttyname) as tty_f:
+			for line in tty_f:
+				print line
 
 if __name__ == '__main__':
 	main()
