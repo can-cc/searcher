@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 import sys
 import signal
 import curses
@@ -7,7 +6,10 @@ import threading
 import six
 
 from searcher.display import Display
-from searcher.keyhandler import KeyHandler
+from searcher.key import KeyHandler
+from searcher.finder import FinderMultiQueryString
+from searcher.view import SelectorView
+from searcher.model import SelectorModel
 
 
 class TerminateLoop(Exception):
@@ -19,23 +21,175 @@ class TerminateLoop(Exception):
         return repr(self.value)
 
 
-class Precol(object):
+class Percol(object):
 
-    def __init__(self):
-        pass
+    def __init__(self, descriptors=None, encoding="utf-8",
+                 finder=None, action_finder=None,
+                 candidates=None, actions=None,
+                 query=None, caret=None, index=None):
+
+        self.global_lock = threading.Lock()
+        self.encoding = encoding
+        
+        if descriptors is None:
+            self.stdin = sys.stdin
+            self.stdout = sys.stdout
+            self.stderr = sys.stderr
+        else:
+            self.stdin = descriptors["stdin"]
+            self.stdout = descriptors["stdout"]
+            self.stderr = descriptors["stderr"]
+
+        from searcher.lazyarray import LazyArray
+        self.candidates = LazyArray(candidates or [])
+
+        if finder is None:
+            finder = FinderMultiQueryString
+        if action_finder is None:
+            action_finder = FinderMultiQueryString
+
+        self.model_candidate = SelectorModel(percol=self,
+                                             collection=self.candidates,
+                                             finder=finder,
+                                             query=query, caret=caret, index=index)
+        self.model = self.model_candidate
+
+    def has_no_candidate(self):
+        return not self.candidates.has_nth_value(0)
 
     def __enter__(self):
-        #init curses and it'screen wrapper
+        # init curses and it'screen wrapper
         self.screen = curses.initscr()
         self.display = Display(self.screen, self.encoding)
 
-        #keyhandler
+        # keyhandler
         self.keyhandler = KeyHandler(self.screen)
 
-        #create view
+        # create view
         self.view = SelectorView(percol=self)
-        
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        curses.nl()
+        curses.endwin()
+        self.execute_action()
+
+    args_for_action = None
+
+    def execute_action(self):
+        pass
+
+    SEARCH_DELAY = 0.05
+
+    def loop(self):
+        self.view.refresh_display()
+
+        while True:
+            try:
+                self.handle_key(self.screen.getch())
+                if self.model.should_search_again():
+                     # search again
+                    with self.global_lock:
+                        # critical section
+                        if not self.result_updating_timer is None:
+                            # clear timer
+                            self.result_updating_timer.cancel()
+                            self.result_updating_timer = None
+
+                        # with bounce
+                        t = threading.Timer(
+                            self.SEARCH_DELAY, search_and_refresh_display)
+                        self.result_updating_timer = t
+                        t.start()
+
+                self.view.refresh_display()
+            except TerminateLoop as e:
+                return e.value
+
+    # ============================================================ #
+    # Key Handling
+    # ============================================================ #
+
+    keymap = {
+        "C-i"         : lambda percol: percol.switch_model(),
+        # text
+        "C-h"         : lambda percol: percol.command.delete_backward_char(),
+        "<backspace>" : lambda percol: percol.command.delete_backward_char(),
+        "C-w"         : lambda percol: percol.command.delete_backward_word(),
+        "C-u"         : lambda percol: percol.command.clear_query(),
+        "<dc>"        : lambda percol: percol.command.delete_forward_char(),
+        # caret
+        "<left>"      : lambda percol: percol.command.backward_char(),
+        "<right>"     : lambda percol: percol.command.forward_char(),
+        # line
+        "<down>"      : lambda percol: percol.command.select_next(),
+        "<up>"        : lambda percol: percol.command.select_previous(),
+        # page
+        "<npage>"     : lambda percol: percol.command.select_next_page(),
+        "<ppage>"     : lambda percol: percol.command.select_previous_page(),
+        # top / bottom
+        "<home>"      : lambda percol: percol.command.select_top(),
+        "<end>"       : lambda percol: percol.command.select_bottom(),
+        # mark
+        "C-SPC"       : lambda percol: percol.command.toggle_mark_and_next(),
+        # finish
+        "RET"         : lambda percol: percol.finish(), # Is RET never sent?
+        "C-m"         : lambda percol: percol.finish(),
+        "C-j"         : lambda percol: percol.finish(),
+        "C-c"         : lambda percol: percol.cancel()
+    }
+
+    def import_keymap(self, keymap, reset = False):
+        if reset:
+            self.keymap = {}
+        else:
+            self.keymap = dict(self.keymap)
+        for key, cmd in six.iteritems(keymap):
+            self.keymap[key] = cmd
+
+    # default
+    last_key = None
+
+    def handle_key(self, ch):
+        if ch == curses.KEY_RESIZE:
+            self.last_key = self.handle_resize(ch)
+        elif ch != -1 and self.keyhandler.is_utf8_multibyte_key(ch):
+            self.last_key = self.handle_utf8(ch)
+        else:
+            self.last_key = self.handle_normal_key(ch)
+
+    def handle_resize(self, ch):
+        self.display.update_screen_size()
+        # XXX: trash -1 (it seems that resize key sends -1)
+        self.keyhandler.get_key_for(self.screen.getch())
+        return key.SPECIAL_KEYS[ch]
+
+    def handle_utf8(self, ch):
+        ukey = self.keyhandler.get_utf8_key_for(ch)
+        self.model.insert_string(ukey)
+        return ukey.encode(self.encoding)
+
+    def handle_normal_key(self, ch):
+        k = self.keyhandler.get_key_for(ch)
+        if k in self.keymap:
+            self.keymap[k](self)
+        elif self.keyhandler.is_displayable_key(ch):
+            self.model.insert_char(ch)
+        return k
+
+    # ------------------------------------------------------------ #
+    # Finish / Cancel
+    # ------------------------------------------------------------ #
 
 
 if __name__ == '__main__':
-    pass
+
+    def getnumbers(n):
+        for x in six.moves.range(1, n):
+            print("yield " + str(x))
+            yield '1111'
+
+    candidates = getnumbers(20)
+    with Percol(candidates=candidates) as percol:
+        exit_code = percol.loop()
+    exit(exit_code)
