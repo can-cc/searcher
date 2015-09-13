@@ -129,7 +129,6 @@ class FinderMultiQuery(CachedFinder):
         res = []
 
         and_search = self.and_search
-
         for subq in sub_queries:
             if subq:
                 find_info = self.find_query(subq, line)

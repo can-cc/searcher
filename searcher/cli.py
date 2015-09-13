@@ -111,50 +111,8 @@ def decide_match_method(options):
 
 
 def main():
-    from searcher import __version__
-    parser = OptionParser(
-        usage="Usage: %prog [options] [FILE]", version="%prog {0}".format(__version__))
-    setup_options(parser)
-    options, args = parser.parse_args()
-
-    if options.peep:
-        exit(1)
-
-    def exit_program(msg=None, show_help=True):
-        if not msg is None:
-            print(msg)
-        if show_help:
-            parser.print_help()
-        exit(1)
-
-    # get ttyname
-    ttyname = options.tty or tty.get_ttyname()
-    if not ttyname:
-        exit_program(error_message("""No tty name is given and failed to guess it from descriptors.
-Maybe all descriptors are redirecred."""))
-    print ttyname
-
-    def open_tty(ttyname):
-        if six.PY2:
-            return open(ttyname, "r+w")
-        else:
-            # See https://github.com/stefanholek/term/issues/1
-            return open(ttyname, "wb+", buffering=0)
-    print 'xx'
-    with open_tty(ttyname) as tty_f:
-        filename = args[0] if len(args) > 0 else None
-        print 'ss'
-        # read input
-        try:
-            candidates = read_input(filename, 'utf-8', reverse=options.reverse)
-            print candidates
-            for line in candidates:
-                print line
-
-        except KeyboardInterrupt:
-            exit_program("Canceled", show_help = False)
+    pass
 
 
-    
 if __name__ == '__main__':
     main()

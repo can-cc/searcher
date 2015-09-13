@@ -8,8 +8,11 @@ import six
 from searcher.display import Display
 from searcher.key import KeyHandler
 from searcher.finder import FinderMultiQueryString
+from searcher.search import SearcherMulitQuery
 from searcher.view import SelectorView
 from searcher.model import SelectorModel
+from searcher.command import SelectorCommand
+from searcher import debug, key, actions
 
 
 class TerminateLoop(Exception):
@@ -21,41 +24,27 @@ class TerminateLoop(Exception):
         return repr(self.value)
 
 
-class Percol(object):
+class Controller(object):
 
+    # caret is '插入符号'
     def __init__(self, descriptors=None, encoding="utf-8",
-                 finder=None, action_finder=None,
-                 candidates=None, actions=None,
+                 actions=None,
                  query=None, caret=None, index=None):
 
         self.global_lock = threading.Lock()
         self.encoding = encoding
-        
-        if descriptors is None:
-            self.stdin = sys.stdin
-            self.stdout = sys.stdout
-            self.stderr = sys.stderr
-        else:
-            self.stdin = descriptors["stdin"]
-            self.stdout = descriptors["stdout"]
-            self.stderr = descriptors["stderr"]
+        self.actions = actions
+        self.stdin = sys.stdin
+        self.stdout = sys.stdout
+        self.stderr = sys.stderr
 
-        from searcher.lazyarray import LazyArray
-        self.candidates = LazyArray(candidates or [])
-
-        if finder is None:
-            finder = FinderMultiQueryString
-        if action_finder is None:
-            action_finder = FinderMultiQueryString
+        searcher = SearcherMulitQuery
 
         self.model_candidate = SelectorModel(percol=self,
-                                             collection=self.candidates,
-                                             finder=finder,
-                                             query=query, caret=caret, index=index)
+                                             searcher=searcher,
+                                             caret=caret,
+                                             index=index)
         self.model = self.model_candidate
-
-    def has_no_candidate(self):
-        return not self.candidates.has_nth_value(0)
 
     def __enter__(self):
         # init curses and it'screen wrapper
@@ -67,6 +56,18 @@ class Percol(object):
 
         # create view
         self.view = SelectorView(percol=self)
+        self.command_candidate = SelectorCommand(
+            self.model_candidate, self.view)
+
+        signal.signal(signal.SIGINT, lambda signum, frame: None)
+        # handle special keys like <f1>, <down>, ...
+        self.screen.keypad(True)
+
+        curses.raw()
+        curses.noecho()
+        curses.cbreak()
+        # Leave newline mode. Make percol distinguish between "C-m" and "C-j".
+        curses.nonl()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -77,18 +78,37 @@ class Percol(object):
     args_for_action = None
 
     def execute_action(self):
-        pass
+        selected_actions = self.model.get_selected_results_with_index()
+        try:
+            action = self.actions
+            if action:
+                action.act(
+                    selected_actions, self)
+        except Exception as e:
+            debug.log("execute_action", e)
 
-    SEARCH_DELAY = 0.05
+    # ============================================================ #
+    # Statuses
+    # ============================================================ #
+    @property
+    def command(self):
+        return self.command_candidate
+
+    SEARCH_DELAY = 0.5
 
     def loop(self):
         self.view.refresh_display()
+        self.result_updating_timer = None
+
+        def search_and_refresh_display():
+            self.model.do_search(self.model.query)
+            self.view.refresh_display()
 
         while True:
             try:
                 self.handle_key(self.screen.getch())
                 if self.model.should_search_again():
-                     # search again
+                    # search again
                     with self.global_lock:
                         # critical section
                         if not self.result_updating_timer is None:
@@ -111,35 +131,35 @@ class Percol(object):
     # ============================================================ #
 
     keymap = {
-        "C-i"         : lambda percol: percol.switch_model(),
+        "C-i": lambda percol: percol.switch_model(),
         # text
-        "C-h"         : lambda percol: percol.command.delete_backward_char(),
-        "<backspace>" : lambda percol: percol.command.delete_backward_char(),
-        "C-w"         : lambda percol: percol.command.delete_backward_word(),
-        "C-u"         : lambda percol: percol.command.clear_query(),
-        "<dc>"        : lambda percol: percol.command.delete_forward_char(),
+        "C-h": lambda percol: percol.command.delete_backward_char(),
+        "<backspace>": lambda percol: percol.command.delete_backward_char(),
+        "C-w": lambda percol: percol.command.delete_backward_word(),
+        "C-u": lambda percol: percol.command.clear_query(),
+        "<dc>": lambda percol: percol.command.delete_forward_char(),
         # caret
-        "<left>"      : lambda percol: percol.command.backward_char(),
-        "<right>"     : lambda percol: percol.command.forward_char(),
+        "<left>": lambda percol: percol.command.backward_char(),
+        "<right>": lambda percol: percol.command.forward_char(),
         # line
-        "<down>"      : lambda percol: percol.command.select_next(),
-        "<up>"        : lambda percol: percol.command.select_previous(),
+        "<down>": lambda percol: percol.command.select_next(),
+        "<up>": lambda percol: percol.command.select_previous(),
         # page
-        "<npage>"     : lambda percol: percol.command.select_next_page(),
-        "<ppage>"     : lambda percol: percol.command.select_previous_page(),
+        "<npage>": lambda percol: percol.command.select_next_page(),
+        "<ppage>": lambda percol: percol.command.select_previous_page(),
         # top / bottom
-        "<home>"      : lambda percol: percol.command.select_top(),
-        "<end>"       : lambda percol: percol.command.select_bottom(),
+        "<home>": lambda percol: percol.command.select_top(),
+        "<end>": lambda percol: percol.command.select_bottom(),
         # mark
-        "C-SPC"       : lambda percol: percol.command.toggle_mark_and_next(),
+        "C-SPC": lambda percol: percol.command.toggle_mark_and_next(),
         # finish
-        "RET"         : lambda percol: percol.finish(), # Is RET never sent?
-        "C-m"         : lambda percol: percol.finish(),
-        "C-j"         : lambda percol: percol.finish(),
-        "C-c"         : lambda percol: percol.cancel()
+        "RET": lambda percol: percol.finish(),  # Is RET never sent?
+        "C-m": lambda percol: percol.finish(),
+        "C-j": lambda percol: percol.finish(),
+        "C-c": lambda percol: percol.cancel()
     }
 
-    def import_keymap(self, keymap, reset = False):
+    def import_keymap(self, keymap, reset=False):
         if reset:
             self.keymap = {}
         else:
@@ -181,15 +201,30 @@ class Percol(object):
     # Finish / Cancel
     # ------------------------------------------------------------ #
 
+    def finish(self):
+        # save selected candidates and use them later (in execute_action)
+        raise TerminateLoop(self.finish_with_exit_code())          # success
+
+    def cancel(self):
+        raise TerminateLoop(self.cancel_with_exit_code())          # failure
+
+    def finish_with_exit_code(self):
+        self.args_for_action = self.model_candidate.\
+            get_selected_results_with_index()
+        return 0
+
+    def cancel_with_exit_code(self):
+        return 1
+
 
 if __name__ == '__main__':
 
     def getnumbers(n):
         for x in six.moves.range(1, n):
-            print("yield " + str(x))
-            yield '1111'
-
+            yield '1234'
+    candidate_finder_class = action_finder_class = FinderMultiQueryString
+    acts = actions.select_to_open_vim
     candidates = getnumbers(20)
-    with Percol(candidates=candidates) as percol:
+    with Controller(actions=acts) as percol:
         exit_code = percol.loop()
     exit(exit_code)

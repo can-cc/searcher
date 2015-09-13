@@ -9,17 +9,19 @@ from itertools import islice
 
 from searcher import display, debug
 
+
 class SelectorView(object):
-    def __init__(self, percol = None):
-        self.percol  = percol
-        self.screen  = percol.screen
+
+    def __init__(self, percol=None):
+        self.percol = percol
+        self.screen = percol.screen
         self.display = percol.display
 
-    CANDIDATES_LINE_BASIC    = ("on_default", "default")
+    CANDIDATES_LINE_BASIC = ("on_default", "default")
     CANDIDATES_LINE_SELECTED = ("underline", "on_magenta", "white")
-    CANDIDATES_LINE_MARKED   = ("bold", "on_cyan", "black")
-    CANDIDATES_LINE_QUERY    = ("yellow", "bold")
-    MESSAGE_ERROR            = ("on_red", "white")
+    CANDIDATES_LINE_MARKED = ("bold", "on_cyan", "black")
+    CANDIDATES_LINE_QUERY = ("yellow", "bold")
+    MESSAGE_ERROR = ("on_red", "white")
 
     @property
     def RESULTS_DISPLAY_MAX(self):
@@ -52,13 +54,14 @@ class SelectorView(object):
             self.display_prompt()
             self.display.refresh()
 
-    def display_line(self, y, x, s, style = None):
+    def display_line(self, y, x, s, style=None):
         if style is None:
             style = self.CANDIDATES_LINE_BASIC
-        self.display.add_aligned_string(s, y_offset = y, x_offset = x, style = style, fill = True)
+        self.display.add_aligned_string(
+            s, y_offset=y, x_offset=x, style=style, fill=True)
 
-    def display_result(self, y, result, is_current = False, is_marked = False):
-        line, find_info, abs_idx = result
+    def display_result(self, y, result, is_current=False, is_marked=False):
+        line, find_info, abs_idx, filename, position = result
 
         if is_current:
             line_style = self.CANDIDATES_LINE_SELECTED
@@ -69,36 +72,39 @@ class SelectorView(object):
 
         keyword_style = self.CANDIDATES_LINE_QUERY + line_style
 
-        self.display_line(y, 0, line, style = line_style)
+        self.display_line(y, 0, line, style=line_style)
 
         if find_info is None:
             return
         for (subq, match_info) in find_info:
             for x_offset, subq_len in match_info:
                 try:
-                    x_offset_real = display.screen_len(line, beg = 0, end = x_offset)
+                    x_offset_real = display.screen_len(
+                        line, beg=0, end=x_offset)
                     self.display.add_string(line[x_offset:x_offset + subq_len],
-                                            pos_y = y,
-                                            pos_x = x_offset_real,
-                                            style = keyword_style)
+                                            pos_y=y,
+                                            pos_x=x_offset_real,
+                                            style=keyword_style)
                 except curses.error as e:
                     debug.log("addnstr", str(e) + " ({0})".format(y))
 
     def display_error_message(self, message):
-        self.display_line(self.RESULTS_OFFSET_V, 0, message, style=self.MESSAGE_ERROR)
+        self.display_line(self.RESULTS_OFFSET_V, 0,
+                          message, style=self.MESSAGE_ERROR)
 
     def display_results(self):
         result_vertical_pos = self.RESULTS_OFFSET_V
         result_pos_direction = 1 if self.results_top_down else -1
 
-        results_in_page = islice(enumerate(self.model.results), self.absolute_page_head, self.absolute_page_tail)
+        results_in_page = islice(enumerate(
+            self.model.results), self.absolute_page_head, self.absolute_page_tail)
 
         try:
             for cand_nth, result in results_in_page:
                 try:
                     self.display_result(result_vertical_pos, result,
-                                        is_current = cand_nth == self.model.index,
-                                        is_marked = self.model.get_is_marked(cand_nth))
+                                        is_current=cand_nth == self.model.index,
+                                        is_marked=self.model.get_is_marked(cand_nth))
                 except curses.error as e:
                     debug.log("display_results", str(e))
                 result_vertical_pos += result_pos_direction
@@ -110,10 +116,13 @@ class SelectorView(object):
                               ": "
                               + six.text_type(e.__getattribute__(key)),
                               dir(e)
-                          ))
+                              ))
                       ))
-            exception_raw_string = str(e).decode(self.percol.encoding) if six.PY2 else str(e)
-            self.display_error_message("Error at line " + str(cand_nth) + ": " + exception_raw_string)
+            exception_raw_string = str(e).decode(
+                self.percol.encoding) if six.PY2 else str(e)
+            # self.display_error_message(
+            #     "Error at line " + str(cand_nth) + ": " + exception_raw_string)
+            raise e
 
     results_top_down = True
 
@@ -145,12 +154,12 @@ class SelectorView(object):
         else:
             return self.display.Y_END
 
-    PROMPT  = u"QUERY> %q"
+    PROMPT = u"QUERY> %q"
     RPROMPT = u"(%i/%I) [%n/%N]"
 
     def do_display_prompt(self, format,
-                          y_offset = 0, x_offset = 0,
-                          y_align = "top", x_align = "left"):
+                          y_offset=0, x_offset=0,
+                          y_align="top", x_align="left"):
         parsed = self.display.markup_parser.parse(format)
         offset = 0
         tokens = []
@@ -163,10 +172,10 @@ class SelectorView(object):
             offset += display.screen_len(formatted_string)
 
         y, x = self.display.add_aligned_string_tokens(tokens,
-                                                      y_offset = y_offset,
-                                                      x_offset = x_offset,
-                                                      y_align = y_align,
-                                                      x_align = x_align)
+                                                      y_offset=y_offset,
+                                                      x_offset=x_offset,
+                                                      y_align=y_align,
+                                                      x_align=x_align)
 
         # when %q is specified, record its position
         if self.last_query_position >= 0:
@@ -178,11 +187,11 @@ class SelectorView(object):
         self.caret_y = -1
 
         self.do_display_prompt(self.RPROMPT,
-                               y_offset = self.PROMPT_OFFSET_V,
-                               x_align = "right")
+                               y_offset=self.PROMPT_OFFSET_V,
+                               x_align="right")
 
         self.do_display_prompt(self.PROMPT,
-                               y_offset = self.PROMPT_OFFSET_V)
+                               y_offset=self.PROMPT_OFFSET_V)
 
         try:
             # move caret
@@ -198,25 +207,27 @@ class SelectorView(object):
         return self.model.query
 
     prompt_replacees = {
-        "%" : lambda self, **args: "%",
+        "%": lambda self, **args: "%",
         # display query and caret
-        "q" : lambda self, **args: self.handle_format_prompt_query(args["matchobj"], args["offset"]),
+        "q": lambda self, **args: self.handle_format_prompt_query(args["matchobj"], args["offset"]),
         # display query but does not display caret
-        "Q" : lambda self, **args: self.model.query,
-        "n" : lambda self, **args: self.page_number,
-        "N" : lambda self, **args: self.total_page_number,
-        "i" : lambda self, **args: self.model.index + (1 if self.model.results_count > 0 else 0),
-        "I" : lambda self, **args: self.model.results_count,
-        "c" : lambda self, **args: self.model.caret,
-        "k" : lambda self, **args: self.percol.last_key
+        "Q": lambda self, **args: self.model.query,
+        "n": lambda self, **args: self.page_number,
+        "N": lambda self, **args: self.total_page_number,
+        "i": lambda self, **args: self.model.index + (1 if self.model.results_count > 0 else 0),
+        "I": lambda self, **args: self.model.results_count,
+        "c": lambda self, **args: self.model.caret,
+        "k": lambda self, **args: self.percol.last_key
     }
 
     format_pattern = re.compile(u'%([a-zA-Z%])')
-    def format_prompt_string(self, s, offset = 0):
+
+    def format_prompt_string(self, s, offset=0):
         def formatter(matchobj):
             al = matchobj.group(1)
             if al in self.prompt_replacees:
-                res = self.prompt_replacees[al](self, matchobj = matchobj, offset = offset)
+                res = self.prompt_replacees[al](
+                    self, matchobj=matchobj, offset=offset)
                 return (res if isinstance(res, six.text_type)
                         else six.text_type(res))
             else:

@@ -1,17 +1,20 @@
 # -*- coding: utf-8 -*-
 
 import six
-from searcher import display, debug
+from percol import display, debug
 
 
 class SelectorModel(object):
 
     def __init__(self,
-                 percol, collection, finder,
-                 query=None, caret=None, index=None):
-        self.original_finder_class = finder
+                 percol,
+                 searcher,
+                 query=None,
+                 caret=None,
+                 index=None):
+        self.original_searcher_class = searcher
         self.percol = percol
-        self.finder = finder(collection)
+        self.searcher = searcher()
         self.setup_results(query)
         self.setup_caret(caret)
         self.setup_index(index)
@@ -34,7 +37,7 @@ class SelectorModel(object):
 
     def setup_results(self, query):
         self.query = self.old_query = query or u""
-        self.results = self.finder.get_results(self.query)
+        self.results = self.searcher.get_results(self.query)
         self.marks = {}
 
     def setup_caret(self, caret):
@@ -73,7 +76,7 @@ class SelectorModel(object):
     def do_search(self, query):
         with self.percol.global_lock:
             self.index = 0
-            self.results = self.finder.get_results(query)
+            self.results = self.searcher.get_results(query)
             self.marks = {}
             # search finished
             self.search_forced = False
@@ -95,7 +98,7 @@ class SelectorModel(object):
                 index = self.index
                 # EAFP (results may be a zero-length list)
                 result = self.results[index]
-                results.append((result[0], index, result[2]))
+                results.append((result[0], index, result[2], result[3], result[4]))
             except Exception as e:
                 debug.log("get_selected_results_with_index", e)
         return results
@@ -174,9 +177,3 @@ class SelectorModel(object):
         caret_pos = self.caret + len(string)
         self.query = self.query[:self.caret] + string + self.query[self.caret:]
         self.caret = caret_pos
-
-    # ------------------------------------------------------------ #
-    # Finder
-    # ------------------------------------------------------------ #
-    def remake_finder(self, new_finder_class):
-        self.finder = self.finder.clone_as(new_finder_class)
